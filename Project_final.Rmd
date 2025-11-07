@@ -1,0 +1,144 @@
+---
+title: "Project_Final"
+output: pdf_document
+date: "2024-12-13"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+summary(cars)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+set.seed(101) 
+getwd()
+setwd("/Users/ashwathramsundar/Desktop/Desktop/Regression /Project")
+library(readr)
+# Importing train.csv
+train_data <- read_csv("train.csv")
+# Importing test.csv
+test_data <- read_csv("test.csv")
+# Checking the first few rows and structure of the datasets to verify if my importing is accurate
+head(train_data)
+str(train_data)
+head(test_data)
+str(test_data)
+summary(train_data)
+cor(train_data[, sapply(train_data, is.numeric)])
+
+library(ggplot2)
+library(dplyr)
+
+cleaned_train <- train_data %>%
+  filter_all(all_vars(is.finite(.)))
+
+cleaned_test <- test_data %>%
+  filter_all(all_vars(is.finite(.)))
+
+#happiness vs log_gdp_per_capita
+ggplot(train_data, aes(x = log_gdp_per_capita, y = happiness)) +
+  geom_point() +
+  geom_smooth(method = "lm", color = "black") +
+  labs(title = "Happiness vs Log GDP Per Capita", x = "Log GDP Per Capita", y = "Happiness")
+#The scatter plot indicates that there is a clear positive relationship between Log GDP Per Capita and Happiness.
+#As Log GDP Per Capita increases, Happiness also increases.
+
+Simple_linear_model <- lm(happiness ~ log_gdp_per_capita, data = train_data)
+summary(Simple_linear_model)
+multivariable_model <- lm(happiness ~ log_gdp_per_capita + social_support + life_expectancy, data = train_data)
+summary(multivariable_model)
+#The linear model's R^2 increased from 0.6224 to 0.6883 in the multilinear model. This shows more variablity in happiness. 
+#Approximately 68.83% of the variation in happiness is explained by the model. This indicates a reasonably good fit.
+#On average, the predictions deviate from the actual happiness values by approximately 0.632 units.
+#The overall model is statistically significant (p-value < 2.2e-16), meaning the predictors collectively contribute significantly to explaining happiness.
+
+#In order for us to stabilize the model (its variance) and also address the heteroscadascity, I introduced the log transformation 
+train_data$log_happiness <- log(train_data$happiness)
+log_model <- lm(log_happiness ~ log_gdp_per_capita + social_support + life_expectancy, data = train_data)
+summary(log_model)
+#This shows a tighter fit with a residual error of 0.1183. 
+
+plot(fitted(log_model), residuals(log_model), 
+     main = "Residuals vs Fitted (Log)",
+     xlab = "Fitted Values", ylab = "Residuals")
+abline(h = 0, col = "darkred")
+#The residuals are scattered randomly arund the darkred line. The pattern is also 
+#random which indicates that the heteroscedascity has been addressed. 
+
+hist(residuals(log_model), breaks = 20, col = "darkgreen", 
+     main = "Histogram of Residuals (Log)",
+     xlab = "Residuals")
+#The histogram indicates its a normal distribution because of the shape. The tallest 
+#residual is on/around 0 which denotes a well fitted model. 
+
+#Generated QQ plot to confirm my findings
+qqnorm(residuals(log_model), main = "QQ Plot of Residuals (Log)")
+qqline(residuals(log_model), col = "pink", lwd = 2)
+#The points are on the red line which indicates that they are normally distributed. 
+
+#Now I want to introduce models that I learned in the 2nd half of the course. 
+plot(ts(train_data$happiness), main = "Happiness Over Time", ylab = "Happiness", xlab = "Time")
+#The plot appears to be fluctuating quite a bit. This tells us potential not stationary. 
+
+#To check it, I am introduceing the Dickey-Fuller test
+library(tseries)
+adf_result <- adf.test(train_data$happiness)
+print(adf_result)
+#The p value is 0.01. We know that if the p value is less that 0.05 we can reject H0, null hypothesis. 
+#This means that the time series is stationary. To strengthen my claim, the test statistic is -9.3159 proving its stationary. 
+
+acf(train_data$happiness, main = "ACF of Happiness")
+pacf(train_data$happiness, main = "PACF of Happiness")
+#The ACF shows a strong autocorrelation at lag 1, and gradually decreases after it. Which indicates AR process.
+#We notice in the PACF that after lag 1 it sharply cuts off. This suggests an AR(1) process. 
+#From this we infer that we can fit an ARMA(1,1) model. 
+
+install.packages("TSA")
+library(TSA)
+arma_model <- arima(train_data$happiness, order = c(1, 0, 1))
+summary(arma_model)
+coefficients <- arma_model$coef
+std_errors <- sqrt(diag(arma_model$var.coef))
+coef_table <- data.frame(
+  Coefficient = coefficients,
+  `Std. Error` = std_errors
+)
+print(coef_table)
+#The std error is 0.015 which is small indicating that the model is precise. 
+
+#Now I will calulcate for the residuals to verify white noise. 
+acf(residuals(arma_model), main = "ACF of Residuals")
+acf_values <- acf(residuals(arma_model), plot = FALSE)
+print(acf_values)
+#The ARMA model has captured the dependencies in the data. 
+
+#I want to run the Ljung Box test to test for autocorrelation 
+Box.test(residuals(arma_model), lag = 10, type = "Ljung-Box")
+cat("AIC for ARMA(1,1):", AIC(arma_model), "\n")
+#The p value which is 0.03 indicates that there is still autocorrelation. 
+
+#I wanted to visualize the data more, hence I viusalized through the seasonal graph
+seasonal_plot <- stl(ts(train_data$happiness, frequency = 12), s.window = "periodic")
+plot(seasonal_plot)
+#The panel shows us the seasonal pattern in the data. There is a clear and regular repeating pattern, indicating strong seasonality.The amplitude of the seasonal component seems consistent over time, meaning the effect of seasonality is stable.
+
+
+
